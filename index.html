@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Multi-Site Jumper</title>
+  <style>
+    :root{ --bg:#0f1724; --card:#0b1220; --accent:#06b6d4; --muted:#94a3b8; }
+    *{box-sizing:border-box;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial}
+    body{margin:0;background:linear-gradient(180deg,#071027 0%, #04111a 100%);color:#e6eef6}
+    .app{display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+    .sidebar{padding:18px;border-right:1px solid rgba(255,255,255,0.03);background:rgba(255,255,255,0.02)}
+    .brand{font-weight:700;font-size:18px;margin-bottom:12px}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+    textarea{width:100%;height:140px;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02);color:inherit;resize:vertical}
+    .controls{display:flex;gap:8px;margin-top:10px}
+    button{background:var(--accent);border:none;padding:8px 10px;border-radius:8px;color:#022;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .list{margin-top:12px;max-height:220px;overflow:auto;padding-right:6px}
+    .site-item{padding:8px;border-radius:6px;font-size:13px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+    .site-item.active{background:linear-gradient(90deg, rgba(6,182,212,0.08), rgba(6,182,212,0.02));color:#dff}
+    .footer{position:absolute;left:18px;bottom:18px;font-size:12px;color:var(--muted)}
+    .viewer{padding:12px;position:relative}
+    .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    .search{flex:1}
+    input[type=text]{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02);color:inherit}
+    .meta{font-size:13px;color:var(--muted)}
+    iframe{width:100%;height:calc(100vh - 92px);border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:#fff}
+    .hint{font-size:12px;color:var(--muted);margin-top:8px}
+    @media(max-width:900px){.app{grid-template-columns:1fr}
+      .sidebar{position:relative;order:2}
+      .viewer{order:1}
+      iframe{height:60vh}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">Multi‑Site Jumper</div>
+
+      <label>Paste URLs (one per line)</label>
+      <textarea id="urlList">https://swapd.co/u/hasnain
+https://scratch.mit.edu/users/hasnain
+https://www.scribd.com/hasnain
+https://sketchfab.com/hasnain
+https://hasnain.slack.com
+https://slideshare.net/hasnain
+https://slides.com/hasnain
+https://www.smule.com/hasnain
+https://www.sooplive.co.kr/station/hasnain
+https://soundcloud.com/hasnain
+https://speakerdeck.com/hasnain</textarea>
+
+      <div class="controls">
+        <button id="load">Load</button>
+        <button id="clear" class="ghost">Clear</button>
+      </div>
+
+      <label style="margin-top:12px">Sites</label>
+      <div class="list" id="sites"></div>
+
+      <div class="hint">Keyboard shortcuts: <strong>/</strong> focus search, <strong>n</strong> next, <strong>p</strong> prev, <strong>o</strong> open new tab</div>
+      <div class="footer">LocalStorage saves your list automatically.</div>
+    </aside>
+
+    <main class="viewer">
+      <div class="toolbar">
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="prev" class="ghost">◀ Prev</button>
+          <button id="next" class="ghost">Next ▶</button>
+          <button id="openTab">Open in new tab</button>
+        </div>
+
+        <div class="search">
+          <input id="search" type="text" placeholder="Type to filter sites — press / to focus" />
+        </div>
+
+        <div class="meta" id="meta">0 / 0</div>
+      </div>
+
+      <iframe id="viewerFrame" srcdoc="<p style='padding:18px;color:#222'>No site loaded.</p>"></iframe>
+      <div id="notice" class="hint"></div>
+    </main>
+  </div>
+
+  <script>
+    // Helper utils
+    const byId = id => document.getElementById(id);
+    let sites = [];
+    let index = 0;
+    const frame = byId('viewerFrame');
+    const sitesEl = byId('sites');
+    const meta = byId('meta');
+    const notice = byId('notice');
+
+    function normalize(url){
+      if(!url) return null;
+      url = url.trim();
+      if(!url) return null;
+      // add protocol if missing
+      if(!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      return url;
+    }
+
+    function renderList(){
+      sitesEl.innerHTML = '';
+      sites.forEach((s,i)=>{
+        const div = document.createElement('div');
+        div.className = 'site-item' + (i===index? ' active':'');
+        div.innerHTML = `<span title="${s}">${s.replace(/^https?:\/\//,'')}</span><div style=\"display:flex;gap:6px\"><button data-i=${i} class=\"ghost\">▶</button></div>`;
+        sitesEl.appendChild(div);
+      });
+      meta.textContent = `${index+1} / ${sites.length}`;
+    }
+
+    function loadFromTextarea(){
+      const raw = byId('urlList').value.split('\n');
+      sites = raw.map(normalize).filter(Boolean);
+      index = 0;
+      save();
+      renderList();
+      loadIndex(index);
+    }
+
+    function loadIndex(i){
+      if(sites.length===0){ frame.srcdoc = '<p style="padding:18px;color:#222">No site loaded.</p>'; meta.textContent = '0 / 0'; return; }
+      if(i<0) i = 0; if(i>=sites.length) i = sites.length-1;
+      index = i;
+      const url = sites[index];
+
+      // Try to embed in iframe. Many big sites block embedding via X-Frame-Options.
+      // We detect if embedding likely failed by listening for load and checking frame.contentWindow length (best-effort).
+      frame.src = url;
+      renderList();
+      notice.textContent = `Trying to load ${url} — if the site blocks embedding it will open in a new tab when you press Open.`;
+
+      // Small heuristic: after 1.2s, if iframe stayed at about:blank, show hint to open in new tab.
+      setTimeout(()=>{
+        try{
+          const cwd = frame.contentWindow.location.href;
+          if(!cwd || cwd === 'about:blank'){
+            notice.textContent = `Note: many sites block embedding. Use "Open in new tab" (or press 'o') if you see a blank page.`;
+          } else {
+            notice.textContent = '';
+          }
+        }catch(e){
+          // cross-origin access will throw — assume loaded but blocked from reading
+          notice.textContent = '';
+        }
+      },1200);
+    }
+
+    function next(){ loadIndex(index+1); }
+    function prev(){ loadIndex(index-1); }
+
+    // Open current in new tab
+    function openTab(){ if(sites[index]) window.open(sites[index], '_blank'); }
+
+    // Save & load from localStorage
+    function save(){ localStorage.setItem('msj_sites', JSON.stringify(sites)); }
+    function loadSaved(){ const s = localStorage.getItem('msj_sites'); if(s){ try{ sites = JSON.parse(s); }catch{} } }
+
+    // Event bindings
+    byId('load').addEventListener('click', loadFromTextarea);
+    byId('clear').addEventListener('click', ()=>{ byId('urlList').value=''; sites=[]; save(); renderList(); loadIndex(0); });
+    byId('next').addEventListener('click', next);
+    byId('prev').addEventListener('click', prev);
+    byId('openTab').addEventListener('click', openTab);
+
+    // delegate click for quick open from list
+    sitesEl.addEventListener('click', e=>{
+      const btn = e.target.closest('button');
+      if(!btn) return;
+      const i = parseInt(btn.dataset.i||'0');
+      loadIndex(i);
+    });
+
+    // Search filter
+    const search = byId('search');
+    search.addEventListener('input', ()=>{
+      const q = search.value.trim().toLowerCase();
+      Array.from(sitesEl.children).forEach((el, i)=>{
+        const txt = el.textContent.toLowerCase();
+        el.style.display = q? (txt.includes(q)? 'flex' : 'none') : 'flex';
+      });
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e=>{
+      if(e.key === '/'){
+        e.preventDefault(); search.focus(); search.select(); return;
+      }
+      if(e.key === 'n'){ next(); }
+      if(e.key === 'p'){ prev(); }
+      if(e.key === 'o'){ openTab(); }
+    });
+
+    // Initialize
+    (function init(){
+      loadSaved();
+      // If localStorage empty, use textarea default and load it
+      if(sites.length===0){ loadFromTextarea(); } else { renderList(); loadIndex(0); byId('urlList').value = sites.join('\n'); }
+    })();
+
+    // Save when textarea changes
+    byId('urlList').addEventListener('change', ()=>{ loadFromTextarea(); });
+
+  </script>
+</body>
+</html>
